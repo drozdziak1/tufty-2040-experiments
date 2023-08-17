@@ -4,11 +4,22 @@
 #![no_std]
 #![no_main]
 
-use bsp::entry;
+use bsp::{
+    entry,
+    hal::gpio::{Pin, PinId, PinMode, ValidPinMode, PushPullOutput},
+};
+use cortex_m::delay::Delay;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
 use panic_probe as _;
+
+use embedded_alloc::Heap;
+
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+
+const MORSE_TIME_BASE_MS: u32 = 100;
 
 // Provide an alias for our BSP so we can switch targets quickly.
 // Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
@@ -22,9 +33,44 @@ use bsp::hal::{
     watchdog::Watchdog,
 };
 
+fn blink_morse<I: PinId>(msg: &str, pin: &mut Pin<I, PushPullOutput>, delay: &mut Delay) {
+    let morse_msg = morse_nostd::encode::encode(msg).unwrap();
+
+    for ch in morse_msg.chars() {
+	match ch {
+	    '.' => {
+		pin.set_high().unwrap();
+		delay.delay_ms(MORSE_TIME_BASE_MS);
+		pin.set_low().unwrap();
+	    }
+	    '_' => {
+		pin.set_high().unwrap();
+		delay.delay_ms(3 * MORSE_TIME_BASE_MS);
+		pin.set_low().unwrap();
+	    }
+	    ' ' => {
+		delay.delay_ms(2 * MORSE_TIME_BASE_MS);
+	    }
+	    '/' => {
+		delay.delay_ms(6 * MORSE_TIME_BASE_MS);
+	    }
+	    _other => {}
+	}
+	delay.delay_ms(MORSE_TIME_BASE_MS);
+    }
+}
+
 #[entry]
 fn main() -> ! {
     info!("Program start");
+
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+    }
+
     let mut pac = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(pac.WATCHDOG);
@@ -61,12 +107,8 @@ fn main() -> ! {
     let mut led_pin = pins.led.into_push_pull_output();
 
     loop {
-        info!("on!");
-        led_pin.set_high().unwrap();
-        delay.delay_ms(250);
-        info!("off!");
-        led_pin.set_low().unwrap();
-        delay.delay_ms(500);
+        blink_morse("drozdziak1", &mut led_pin, &mut delay);
+        delay.delay_ms(MORSE_TIME_BASE_MS * 7);
     }
 }
 
